@@ -127,7 +127,7 @@ class GPSSAgent:
 
         try:
             # Prepare registration data
-            url = f"{SERVER_URL}/agents"
+            url = f"{SERVER_URL}/agent/register"
             data = json.dumps({
                 'install_token': self.config['install_token'],
                 'hostname': self.config['hostname'],
