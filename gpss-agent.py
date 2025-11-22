@@ -373,8 +373,9 @@ WantedBy=multi-user.target
     def _send_heartbeat(self):
         """Send heartbeat to server"""
         try:
-            url = f"{SERVER_URL}/agents/{self.config['agent_id']}/heartbeat"
+            url = f"{SERVER_URL}/agent/heartbeat"
             data = json.dumps({
+                'agent_id': self.config['agent_id'],
                 'status': 'online',
                 'timestamp': int(time.time())
             }).encode('utf-8')
@@ -384,7 +385,6 @@ WantedBy=multi-user.target
                 data=data,
                 headers={
                     'Content-Type': 'application/json',
-                    'Authorization': f"Bearer {self.config['api_key']}",
                     'User-Agent': 'GPSS-Agent/1.0'
                 },
                 method='POST'
