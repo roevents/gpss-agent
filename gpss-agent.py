@@ -87,16 +87,17 @@ class GPSSAgent:
             with urllib.request.urlopen(req, context=context, timeout=30) as response:
                 result = json.loads(response.read().decode('utf-8'))
 
-            if result.get('valid'):
+            if result.get('success'):
                 print("✓ Token validated successfully")
 
-                # Extract configuration from response
+                # Extract configuration from response data
+                data = result.get('data', {})
                 config = {
                     'install_token': token,
                     'server_url': SERVER_URL,
-                    'organization_id': result.get('organization_id'),
-                    'department_id': result.get('department_id'),
-                    'os_type': result.get('os_type'),
+                    'organization_id': data.get('organization_id'),
+                    'department_id': data.get('department_id'),
+                    'os_type': data.get('os_type'),
                     'hostname': socket.gethostname(),
                     'platform': self.platform
                 }
