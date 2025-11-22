@@ -1,0 +1,133 @@
+name: Build GPSS Agent Executables
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows Executables
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Build Windows 64-bit executable
+        run: |
+          pyinstaller --clean gpss-agent.spec
+          Move-Item dist/GPSS-Agent.exe dist/GPSS-Agent-Windows-x64.exe
+
+      - name: Build Windows 32-bit executable
+        run: |
+          pyinstaller --clean --target-architecture=x86 gpss-agent.spec
+          Move-Item dist/GPSS-Agent.exe dist/GPSS-Agent-Windows-x86.exe
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-executables
+          path: |
+            dist/GPSS-Agent-Windows-x64.exe
+            dist/GPSS-Agent-Windows-x86.exe
+          retention-days: 90
+
+  build-linux:
+    name: Build Linux Executable
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Build Linux executable
+        run: |
+          pyinstaller --clean gpss-agent.spec
+          cp dist/GPSS-Agent dist/gpss-agent-linux-amd64
+          chmod +x dist/gpss-agent-linux-amd64
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-executables
+          path: dist/gpss-agent-linux-amd64
+          retention-days: 90
+
+  build-macos:
+    name: Build macOS Executable
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Build macOS executable
+        run: |
+          pyinstaller --clean gpss-agent.spec
+          cp dist/GPSS-Agent dist/gpss-agent-macos-x64
+          chmod +x dist/gpss-agent-macos-x64
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-executables
+          path: dist/gpss-agent-macos-x64
+          retention-days: 90
+
+  create-release:
+    name: Create Release
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            windows-executables/GPSS-Agent-Windows-x64.exe
+            windows-executables/GPSS-Agent-Windows-x86.exe
+            linux-executables/gpss-agent-linux-amd64
+            macos-executables/gpss-agent-macos-x64
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
