@@ -156,7 +156,7 @@ class GPSSAgent:
                 agent_data = result.get('data', {})
 
                 # Update config with permanent credentials
-                self.config['agent_id'] = agent_data.get('id')
+                self.config['agent_id'] = agent_data.get('agent_id')
                 self.config['api_key'] = agent_data.get('api_key')
 
                 # Remove install token (no longer needed)
