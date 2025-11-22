@@ -23,6 +23,7 @@ from datetime import datetime
 SERVER_URL = "https://vm.gpss.ro/api"
 CONFIG_FILE = "config.json"
 HEARTBEAT_INTERVAL = 60  # seconds
+COMMAND_CHECK_INTERVAL = 30  # seconds
 
 class GPSSAgent:
     def __init__(self):
@@ -307,6 +308,262 @@ class GPSSAgent:
             print(f"Heartbeat error: {e}")
             return False
 
+    def _check_pending_commands(self):
+        """Check for pending commands from server"""
+        try:
+            url = f"{SERVER_URL}/agent/commands/pending"
+
+            req = urllib.request.Request(
+                url,
+                headers={
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'GPSS-Agent/2.0',
+                    'X-Agent-ID': self.config['agent_id'],
+                    'X-API-Key': self.config['api_key']
+                },
+                method='GET'
+            )
+
+            context = ssl.create_default_context()
+
+            with urllib.request.urlopen(req, context=context, timeout=30) as response:
+                result = json.loads(response.read().decode('utf-8'))
+
+            if result.get('success'):
+                return result.get('data', {}).get('commands', [])
+
+            return []
+
+        except Exception as e:
+            print(f"Command check error: {e}")
+            return []
+
+    def _execute_command(self, command):
+        """Execute a command and return result"""
+        command_id = command.get('id')
+        command_type = command.get('command_type')
+        params = command.get('parameters', {})
+
+        print(f"\n[{time.strftime('%H:%M:%S')}] Executing command: {command_type}")
+
+        try:
+            if command_type == 'uninstall_software':
+                result = self._uninstall_software(params.get('software_name'), params.get('uninstall_string'))
+            elif command_type == 'update_agent':
+                result = self._update_agent(params.get('download_url'))
+            elif command_type == 'restart_agent':
+                result = self._restart_agent()
+            elif command_type == 'uninstall_agent':
+                result = self._uninstall_agent()
+            else:
+                result = {'success': False, 'error': f'Unknown command type: {command_type}'}
+
+            # Report command result
+            self._report_command_result(command_id, result)
+
+            return result
+
+        except Exception as e:
+            error_result = {'success': False, 'error': str(e)}
+            self._report_command_result(command_id, error_result)
+            return error_result
+
+    def _uninstall_software(self, software_name, uninstall_string):
+        """Uninstall software on Windows"""
+        try:
+            if not software_name or not uninstall_string:
+                return {'success': False, 'error': 'Missing software name or uninstall string'}
+
+            print(f"  Uninstalling: {software_name}")
+
+            # Execute uninstall command silently
+            if self.platform == 'windows':
+                # Add silent flags if not present
+                if '/quiet' not in uninstall_string.lower() and '/silent' not in uninstall_string.lower():
+                    uninstall_string += ' /quiet /norestart'
+
+                result = subprocess.run(
+                    uninstall_string,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 minutes max
+                )
+
+                if result.returncode == 0:
+                    return {
+                        'success': True,
+                        'message': f'Successfully uninstalled {software_name}',
+                        'output': result.stdout
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': f'Uninstall failed with code {result.returncode}',
+                        'output': result.stderr
+                    }
+            else:
+                return {'success': False, 'error': 'Uninstall only supported on Windows'}
+
+        except subprocess.TimeoutExpired:
+            return {'success': False, 'error': 'Uninstall timeout (5 minutes)'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _update_agent(self, download_url):
+        """Update agent to new version"""
+        try:
+            if not download_url:
+                return {'success': False, 'error': 'Missing download URL'}
+
+            print(f"  Downloading update from: {download_url}")
+
+            # Download new version
+            temp_file = os.path.join(os.path.dirname(sys.executable), 'GPSS-Agent-Update.exe')
+
+            req = urllib.request.Request(download_url, headers={'User-Agent': 'GPSS-Agent/2.0'})
+            context = ssl.create_default_context()
+
+            with urllib.request.urlopen(req, context=context, timeout=300) as response:
+                with open(temp_file, 'wb') as f:
+                    f.write(response.read())
+
+            print(f"  Downloaded to: {temp_file}")
+
+            # Replace current executable
+            current_exe = sys.executable
+            backup_exe = current_exe + '.bak'
+
+            # Backup current version
+            if os.path.exists(current_exe):
+                if os.path.exists(backup_exe):
+                    os.remove(backup_exe)
+                os.rename(current_exe, backup_exe)
+
+            # Move new version
+            os.rename(temp_file, current_exe)
+
+            print("  Update installed. Restarting...")
+
+            # Restart agent
+            if self.platform == 'windows':
+                subprocess.Popen([current_exe], creationflags=subprocess.DETACHED_PROCESS)
+            else:
+                subprocess.Popen([current_exe])
+
+            # Exit current process
+            sys.exit(0)
+
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _restart_agent(self):
+        """Restart the agent"""
+        try:
+            print("  Restarting agent...")
+
+            current_exe = sys.executable
+
+            if self.platform == 'windows':
+                subprocess.Popen([current_exe], creationflags=subprocess.DETACHED_PROCESS)
+            else:
+                subprocess.Popen([current_exe])
+
+            # Exit current process
+            sys.exit(0)
+
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _uninstall_agent(self):
+        """Uninstall the agent"""
+        try:
+            print("  Uninstalling agent...")
+
+            # Remove config file
+            if os.path.exists(self.config_path):
+                os.remove(self.config_path)
+
+            # Remove service/daemon
+            if self.platform == 'windows':
+                try:
+                    subprocess.run(['sc', 'stop', 'GPSSAgent'], capture_output=True)
+                    subprocess.run(['sc', 'delete', 'GPSSAgent'], capture_output=True)
+                except:
+                    pass
+            elif self.platform == 'linux':
+                try:
+                    subprocess.run(['systemctl', 'stop', 'gpss-agent'], capture_output=True)
+                    subprocess.run(['systemctl', 'disable', 'gpss-agent'], capture_output=True)
+                    if os.path.exists('/etc/systemd/system/gpss-agent.service'):
+                        os.remove('/etc/systemd/system/gpss-agent.service')
+                except:
+                    pass
+            elif self.platform == 'darwin':
+                try:
+                    subprocess.run(['launchctl', 'unload', '/Library/LaunchDaemons/ro.gpss.agent.plist'], capture_output=True)
+                    if os.path.exists('/Library/LaunchDaemons/ro.gpss.agent.plist'):
+                        os.remove('/Library/LaunchDaemons/ro.gpss.agent.plist')
+                except:
+                    pass
+
+            # Remove executable
+            current_exe = sys.executable
+            if os.path.exists(current_exe):
+                # On Windows, we need to delete after exit
+                if self.platform == 'windows':
+                    bat_file = os.path.join(os.getenv('TEMP'), 'gpss-uninstall.bat')
+                    with open(bat_file, 'w') as f:
+                        f.write(f'@echo off\n')
+                        f.write(f'timeout /t 2 /nobreak >nul\n')
+                        f.write(f'del /f /q "{current_exe}"\n')
+                        f.write(f'del /f /q "%~f0"\n')
+                    subprocess.Popen([bat_file], shell=True, creationflags=subprocess.DETACHED_PROCESS)
+                else:
+                    os.remove(current_exe)
+
+            print("  Agent uninstalled")
+            sys.exit(0)
+
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _report_command_result(self, command_id, result):
+        """Report command execution result to server"""
+        try:
+            url = f"{SERVER_URL}/agent/commands/result"
+
+            data = json.dumps({
+                'command_id': command_id,
+                'result': result,
+                'timestamp': int(time.time())
+            }).encode('utf-8')
+
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'GPSS-Agent/2.0',
+                    'X-Agent-ID': self.config['agent_id'],
+                    'X-API-Key': self.config['api_key']
+                },
+                method='POST'
+            )
+
+            context = ssl.create_default_context()
+
+            with urllib.request.urlopen(req, context=context, timeout=30) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+
+            if result.get('success'):
+                print(f"  ✓ Command completed successfully")
+            else:
+                print(f"  ✗ Command failed: {result.get('error')}")
+
+        except Exception as e:
+            print(f"  Error reporting result: {e}")
+
     def _is_first_run(self):
         """Check if this is first run"""
         return not os.path.exists(self.config_path)
@@ -445,14 +702,32 @@ class GPSSAgent:
         print(f"Hostname: {socket.gethostname()}")
         print("Press Ctrl+C to stop\n")
 
+        last_heartbeat = 0
+        last_command_check = 0
+
         try:
             while True:
-                if self._send_heartbeat():
-                    print(f"[{time.strftime('%H:%M:%S')}] ✓ Heartbeat sent")
-                else:
-                    print(f"[{time.strftime('%H:%M:%S')}] ✗ Heartbeat failed")
+                current_time = time.time()
 
-                time.sleep(HEARTBEAT_INTERVAL)
+                # Send heartbeat
+                if current_time - last_heartbeat >= HEARTBEAT_INTERVAL:
+                    if self._send_heartbeat():
+                        print(f"[{time.strftime('%H:%M:%S')}] ✓ Heartbeat sent")
+                    else:
+                        print(f"[{time.strftime('%H:%M:%S')}] ✗ Heartbeat failed")
+                    last_heartbeat = current_time
+
+                # Check for pending commands
+                if current_time - last_command_check >= COMMAND_CHECK_INTERVAL:
+                    commands = self._check_pending_commands()
+                    if commands:
+                        print(f"[{time.strftime('%H:%M:%S')}] Found {len(commands)} pending command(s)")
+                        for command in commands:
+                            self._execute_command(command)
+                    last_command_check = current_time
+
+                # Sleep for a short time
+                time.sleep(5)
 
         except KeyboardInterrupt:
             print("\n\nAgent stopped")
