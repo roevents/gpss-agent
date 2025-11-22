@@ -33,18 +33,11 @@ jobs:
           pyinstaller --clean gpss-agent.spec
           Move-Item dist/GPSS-Agent.exe dist/GPSS-Agent-Windows-x64.exe
 
-      - name: Build Windows 32-bit executable
-        run: |
-          pyinstaller --clean --target-architecture=x86 gpss-agent.spec
-          Move-Item dist/GPSS-Agent.exe dist/GPSS-Agent-Windows-x86.exe
-
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-executables
-          path: |
-            dist/GPSS-Agent-Windows-x64.exe
-            dist/GPSS-Agent-Windows-x86.exe
+          path: dist/GPSS-Agent-Windows-x64.exe
           retention-days: 90
 
   build-linux:
