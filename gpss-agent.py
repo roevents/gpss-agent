@@ -385,7 +385,9 @@ WantedBy=multi-user.target
                 data=data,
                 headers={
                     'Content-Type': 'application/json',
-                    'User-Agent': 'GPSS-Agent/1.0'
+                    'User-Agent': 'GPSS-Agent/1.0',
+                    'X-Agent-ID': self.config['agent_id'],
+                    'X-API-Key': self.config['api_key']
                 },
                 method='POST'
             )
